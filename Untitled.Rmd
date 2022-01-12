@@ -1,0 +1,291 @@
+---
+title: "Life expentency of Countries around the world"
+author: "Nailah Rawnaq"
+date: "1/12/2022"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = F, message = F)
+library(tidyverse)
+library(tidytext)
+library(gganimate)
+library(rnaturalearth)
+
+df <- read_csv("Human_life_Expectancy.csv")
+df <- 
+    df %>% 
+    na_if("Not Available")
+
+df <- 
+    df %>% 
+    pivot_longer(5:34,names_to = "year", values_to = "life_expentancy") %>% 
+    mutate(life_expentancy = as.numeric(life_expentancy),
+           year = as.numeric(year))
+```
+
+## Dataset
+This data set is from from [kaggle](https://www.kaggle.com/deepcontractor/human-life-expectancy-around-the-world) contains the data of mean life expectancy of different countries from year 1990 to 2019.
+
+## Basic exploration
+```{r}
+df %>% 
+  group_by(Country) %>%
+  tally() %>% 
+  nrow()
+```
+The data set contains the data of 186 countries.
+
+```{r}
+df %>% 
+  group_by(Country) %>% 
+  summarise(range = max(life_expentancy,na.rm = T) - min(life_expentancy,na.rm = T)) %>% 
+  mutate(id = case_when(range == max(range) ~ "max",
+                        range == min(range) ~ "min")) %>% 
+  filter(!is.na(id)) %>% 
+  select(-id)
+```
+From 1990 to 2019 we can see that the country Grenada has lower amount of change in the life expectancy and Rwanda has a higher amount of change
+
+```{r}
+df %>% 
+  filter(Country %in% c("Grenada","Rwanda"), Level == "National") %>% 
+  ggplot(aes(year, life_expentancy, col = Country)) +
+  geom_point() +
+  labs(title = "Life expectency with respect to country")
+```
+
+## Top Countries with low and negative flactuation in the life expectency
+```{r}
+df %>% 
+  filter(Level == "National") %>% 
+  nest(data = -Country) %>% 
+  mutate(
+    lm = map(data, ~lm(data = .x,formula = life_expentancy ~ year)),
+    lm = map(lm, tidy),
+    lm = map_dbl(lm, ~.x$estimate[2])
+  ) %>% 
+  slice_min(lm, n = 10) %>% 
+  select(-lm) %>% 
+  unnest() %>% 
+  ggplot(aes(year,life_expentancy,col = Country)) +
+  geom_line()
+```
+
+We can see that for country Eswatini, Lesotho and South Africa there is a drastic change in the life expectancy at 2005. We will later find out whether those 3 countries locate in the same place or in different place.
+
+## Life expectancy (1990)
+```{r}
+df %>%
+  filter(Level == "National", year == "1990") %>%
+  full_join(
+    ne_countries(scale = "medium", returnclass = "sf") %>%
+      as_tibble() %>%
+      select(Country_Code = gu_a3, geometry)
+  ) %>%
+  ggplot(aes(fill = life_expentancy)) +
+  geom_sf(aes(geometry = geometry), col = "white", size = .1) +
+  scale_fill_gradient2(
+    "Life\nExpectancy",
+    high = "#386641",
+    mid = "#a7c957",
+    low = "#bc4749",
+    midpoint = 70,
+    na.value = "gray90",
+    limits = c(30,90)
+  ) +
+  theme_light() +
+  labs(title = "Plot for life expentancy in 1990",
+       x = "Latitude",
+       y = "Longditude") +
+  theme(
+    plot.title = element_text(hjust = .5),
+    legend.title = element_text(hjust = .5),
+    legend.position = c(.7, .1),
+    legend.direction = "horizontal"
+  ) 
+```
+
+We can see that the life expectancy in the Africa, Indian subcontinent and South Amirica is considerably low than the overall world.
+
+
+## Life expectancy (2019)
+```{r}
+df %>%
+  filter(Level == "National", year == "2019") %>%
+  full_join(
+    ne_countries(scale = "medium", returnclass = "sf") %>%
+      as_tibble() %>%
+      select(Country_Code = gu_a3, geometry)
+  ) %>%
+  ggplot(aes(fill = life_expentancy)) +
+  geom_sf(aes(geometry = geometry), col = "white", size = .1) +
+  scale_fill_gradient2(
+    "Life\nExpectancy",
+    high = "#386641",
+    mid = "#a7c957",
+    low = "#bc4749",
+    midpoint = 70,
+    na.value = "gray90", 
+    limits = c(30,90)
+  ) +
+  theme_light() +
+  labs(title = "Plot for life expentancy in 2019",
+       x = "Latitude",
+       y = "Longditude") +
+  theme(
+    plot.title = element_text(hjust = .5),
+    legend.title = element_text(hjust = .5),
+    legend.position = c(.7, .1),
+    legend.direction = "horizontal"
+  ) 
+```
+
+We can see that though the Indian sub-continent and Latin america overcome the lower life expediency problem, still African continent is struggling to overcome it.
+
+## Highest life expentancy each year
+```{r}
+df %>% 
+  filter(Level == "National") %>% 
+  select(Country, year, life_expentancy) %>% 
+  group_by(year) %>% 
+  arrange(year, -life_expentancy) %>% 
+  mutate(id = row_number()) %>% 
+  slice_min(id,n = 15) %>%
+  ggplot() +
+  geom_segment(aes(x = 14, y = id, 
+                   xend = life_expentancy, yend = id, col = Country),size = 5, 
+               show.legend = F) +
+  geom_text(aes(x = 5, y = id,label = Country),
+             hjust = 1,nudge_x = 8, show.legend = F) +
+  geom_text(aes(x = life_expentancy, y =  id ,label = life_expentancy),nudge_x = 3) +
+  lims(x = c(0,90),
+       y = c(15,1)) +
+  theme_minimal() +
+  theme(panel.grid = element_blank(),
+        axis.text.y = element_blank()) +
+  transition_states(year) +
+  labs(title = "Life expentancy with respect to country.",
+       subtitle = "Year: {closest_state}") 
+```
+
+This graph show that the Japan remains consistently in top posision with respect to the life expectancy.
+
+
+## Life expentancy of the country that changed more rapidly
+```{r}
+temp_df <-
+  df %>% 
+  filter(Level == "National") %>% 
+  nest(data = -Country) %>% 
+  mutate(
+    lm = map(data, ~lm(data = .x,formula = life_expentancy ~ year)),
+    lm = map(lm, tidy),
+    lm = map_dbl(lm, ~.x$estimate[2])
+  ) %>% 
+  slice_max(lm, n = 10)
+
+anim <- 
+  temp_df %>% 
+  select(-lm) %>% 
+  unnest() %>% 
+  ggplot(aes(year,life_expentancy, col = Country)) +
+  geom_point(show.legend = F) +
+  geom_line(show.legend = F) +
+  geom_label(aes(label = paste(Country,life_expentancy,sep = ":")),
+            nudge_x = 1.8, show.legend = F) +
+  geom_text(aes(label = as.factor(year),x = 2020, y = 30), show.legend = F) +
+  lims(x = c(NA,2022)) +
+  labs(y = "Life Expectancy",
+       x = "") +
+  transition_reveal(year) 
+
+animation::ani.options(ani.res = 96)
+animate(anim,fps = 15, duration = 15)
+```
+
+This graph show that there something happen in country Rwanda around 1993-94. On that period the life expectancy is reducing whether for most of the countries it is increasing. We will plot the the country in the world map and find the location of Rwanda as well as Sierra Leone, Uganda, Zambia and Malawi because there is a tendency of falling life expectancy at that period.
+
+## World map showing the anomaly of 1993-94
+```{r}
+df %>%
+  filter(Level == "National", year == "2019") %>%
+  full_join(
+    ne_countries(scale = "medium", returnclass = "sf") %>%
+      as_tibble() %>%
+      select(Country_Code = gu_a3, geometry)
+  ) %>%
+  mutate(fill =
+           ifelse(
+             Country %in% c("Rwanda", "Sierra Leone", "Uganda", "Zambia", "Malawi"),
+             "yes",
+             "no"
+           ),
+         label = ifelse(fill == "yes",Country,NA)) %>%
+  ggplot() +
+  geom_sf(
+    aes(geometry = geometry, fill = fill),
+    col = "white",
+    size = .1,
+    show.legend = F
+  ) +
+  labs(title = "World Map marking the countries with anomaly") +
+  scale_fill_manual(values = c("#007500", "lightgreen")) +
+  coord_sf(xlim = c(-40, 80), ylim = c(-45, 45)) +
+  theme(plot.title = element_text(hjust = .5),
+        panel.grid = element_blank(),
+        panel.background = element_rect(fill = "gray98"))
+```
+
+Here we can see that the countries that showed the anomaly are adjacent. So there append something on that period surrounding that place.
+
+## World map showing the anomaly of 2005
+```{r}
+df %>%
+  filter(Level == "National", year == "2019") %>%
+  full_join(
+    ne_countries(scale = "medium", returnclass = "sf") %>%
+      as_tibble() %>%
+      select(Country_Code = gu_a3, geometry)
+  ) %>%
+  mutate(fill =
+           ifelse(
+             Country %in% c("Eswatini", "Lesotho", "South Africa"),
+             "yes",
+             "no"
+           ),
+         label = ifelse(fill == "yes",Country,NA)) %>%
+  ggplot() +
+  geom_sf(
+    aes(geometry = geometry, fill = fill),
+    col = "white",
+    size = .1,
+    show.legend = F
+  ) +
+  labs(title = "World Map marking the countries with anomaly") +
+  scale_fill_manual(values = c("#007500", "lightgreen")) +
+  coord_sf(xlim = c(-40, 80), ylim = c(-45, 45)) +
+  theme(plot.title = element_text(hjust = .5),
+        panel.grid = element_blank(),
+        panel.background = element_rect(fill = "gray98"))
+```
+
+We can see that those countries that showed a drastic change in the life expectancy are located together. Hence it suggest that at that time the place might experienced a higher mortality at lower age group due to some reasons.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
